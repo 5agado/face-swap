@@ -24,10 +24,10 @@ setup(
         'scikit-image',
         'tqdm',
         'dlib',
-        #mxnet,
         'mtcnn', #https://github.com/ipazc/mtcnn
+        'data-science-learning==0.1.0',
     ],
     dependency_links=[
-        'https://github.com/5agado/data-science-learning.git'
+        'https://github.com/5agado/data-science-learning/tarball/master#egg=data-science-learning-0.1.0'
     ],
 )
