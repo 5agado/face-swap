@@ -51,7 +51,7 @@ You can train a new model by using *train.py*. See `train.py -h` for more info.
 Otherwise I would suggest to rely on [Google Colaboratory](https://colab.research.google.com/), which provides a free GPU environment accessible via Jupyter. See [my related notebook](notebooks/Faceswap_Train_GAN.ipynb) which installs all the required dependencies and then provides basic interface to the training functions.
 
 # Resources
-The code is strongly based on [shaoanlu repo and work](https://github.com/shaoanlu/faceswap-GAN). I tried to give a bit more structure to such code, and add comments and pointers for new comers to better understand what exactly is going on.
+This code is colossally based on [shaoanlu repo and work](https://github.com/shaoanlu/faceswap-GAN). I tried to give it a bit more structure, and add comments and pointers for new comers to better understand what exactly is going on.
 
 Other useful references for code and techniques for pre and post-processing phases:
 
@@ -70,7 +70,6 @@ Start image and exec bash
     docker run -it faceswap bash
 
 # TODO
-* fix video conversion for multi-face and when a face is not detected
 * align face -> feed to generator -> detect face in generated image -> align back using landmarks
 * try 128 input (also good to test if all methods are generic)
 

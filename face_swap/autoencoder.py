@@ -83,11 +83,11 @@ def get_autoencoders(cfg):
     autoencoder_b.compile(optimizer=optimizer, loss='mean_absolute_error')
 
     if models_path:
-        print("Loading Models...")
+        print("Loading Autoencoder Models...")
         encoder.load_weights(models_path + '/encoder.h5')
         decoder_a.load_weights(models_path + '/decoder_A.h5')
         decoder_b.load_weights(models_path + '/decoder_B.h5')
-        print("Models Loaded")
+        print("Autoencoder Models Loaded")
 
     return autoencoder_a, autoencoder_b
 

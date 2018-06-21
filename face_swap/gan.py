@@ -127,13 +127,15 @@ def get_gan(cfg, load_discriminators=True):
     models_path = cfg.get('models_path', None)
     img_shape = literal_eval(cfg.get('img_shape'))
     encoder_dim = cfg.get('encoder_dim')
+    encoder_nb_conv_blocks = cfg.get('encoder_nb_conv_blocks')
+    decoder_nb_deconv_blocks = cfg.get('decoder_nb_deconv_blocks')
     decoder_input_shape = literal_eval(cfg.get('decoder_input_shape'))
     discriminator_input_shape = literal_eval(cfg.get('discriminator_input_shape'))
     include_alpha = cfg.get('masked', False)
 
-    encoder = Encoder(img_shape, encoder_dim)
-    decoder_a = Decoder(decoder_input_shape, include_alpha=include_alpha)
-    decoder_b = Decoder(decoder_input_shape, include_alpha=include_alpha)
+    encoder = Encoder(img_shape, encoder_dim, num_conv_blocks=encoder_nb_conv_blocks)
+    decoder_a = Decoder(decoder_input_shape, include_alpha=include_alpha, num_deconv_blocks=decoder_nb_deconv_blocks)
+    decoder_b = Decoder(decoder_input_shape, include_alpha=include_alpha, num_deconv_blocks=decoder_nb_deconv_blocks)
 
     x = Input(shape=img_shape)
 
@@ -144,14 +146,14 @@ def get_gan(cfg, load_discriminators=True):
     dis_b = Discriminator(discriminator_input_shape)
 
     if models_path:
-        print("Loading Models...")
+        print("Loading GAN Models...")
         encoder.load_weights(models_path + '/encoder.h5')
         decoder_a.load_weights(models_path + '/decoder_A.h5')
         decoder_b.load_weights(models_path + '/decoder_B.h5')
         if load_discriminators:
             dis_a.load_weights(models_path + "/netDA.h5")
             dis_b.load_weights(models_path + "/netDB.h5")
-        print("Models Loaded")
+        print("GAN Models Loaded")
 
     return gen_a, gen_b, dis_a, dis_b
 
