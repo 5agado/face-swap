@@ -72,6 +72,7 @@ Start image and exec bash
 # TODO
 * align face -> feed to generator -> detect face in generated image -> align back using landmarks
 * try 128 input (also good to test if all methods are generic)
+* log some stats (frames w w/o faces, faces size, conversion size, execution time of operations)
 
 # License
 

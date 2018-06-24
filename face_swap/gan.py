@@ -40,6 +40,7 @@ def conv(filters, kernel_size=5, strides=2, leaky_relu=False, batch_norm=False):
         return x
     return block
 
+
 # Standard feed-forward CNN with skip connections that bypass the convolution layers
 # ref: http://torch.ch/blog/2016/02/04/resnets.html
 def res_block(filters, kernel_size=3):
@@ -79,7 +80,8 @@ def Encoder(input_shape, hidden_dim=1024, init_filters=128, num_conv_blocks=4):
     for i in range(num_conv_blocks):
         x = conv(init_filters * (2 ** i))(x)
 
-    x = Dense(hidden_dim)(Flatten()(x))
+    x = Flatten()(x)  # 4x4xhidden_dim
+    x = Dense(hidden_dim)(x)
     x = Dense(4 * 4 * hidden_dim)(x)
     x = Reshape((4, 4, hidden_dim))(x)
     x = upscale(hidden_dim//2)(x)
@@ -92,11 +94,12 @@ def Decoder(input_shape, init_filters=256, num_deconv_blocks=3, num_res_blocks=2
     x = model_input
 
     for i in range(num_deconv_blocks):
+        # TODO possible fix: use k=4
         x = upscale(init_filters // (1 if i == 0 else (2 ** i)))(x)
 
     for i in range(num_res_blocks):
-        # TOFIX generalize num filter based on last number in deconv
-        x = res_block(64)(x)
+        # res block num filters is based on last upscale block num of filters
+        x = res_block(init_filters // (2 ** (num_deconv_blocks-1)))(x)
 
     if include_alpha:
         alpha = Conv2D(1, kernel_size=5, padding='same', activation="sigmoid")(x)
@@ -118,6 +121,7 @@ def Discriminator(input_shape, init_filters=64, num_conv_blocks=3):
     x = Conv2D(1, kernel_size=4,
                kernel_initializer=conv_init, use_bias=False, padding="same", activation="sigmoid")(x)
     return Model(model_input, x)
+
 
 # use batchnorm in both generator and discriminator
 # use ReLU in generator for all layers except for the output, which uses Tanh
