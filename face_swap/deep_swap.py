@@ -8,9 +8,12 @@ import cv2
 import numpy as np
 import yaml
 from tqdm import tqdm
+import tensorflow as tf
+tf.logging.set_verbosity(tf.logging.ERROR)
 
 # data-science-utils
 from utils import image_processing
+from utils import super_resolution
 
 from face_swap import CONFIG_PATH
 from face_swap import FaceGenerator
@@ -23,7 +26,7 @@ from face_swap.video_utils import VideoConverter
 
 
 class Swapper:
-    def __init__(self, face_detector, face_generator, config, save_all=False):
+    def __init__(self, face_detector: FaceDetector, face_generator: FaceGenerator, config, save_all=False):
         """
         Utility object that holds and manages the components necessary for swapping faces in a picture.
         :param face_detector:
@@ -39,8 +42,9 @@ class Swapper:
         # Video converter helps smoothing frames transition, via moving average or kalman filter
         self.video_converter = None
         if 'video_smooth_filter' in self.config:
-            self.video_converter = utils.VideoConverter(use_kalman_filter=self.config['video_smooth_filter'] ==
-                                                        'kalman')
+            self.video_converter = video_utils.VideoConverter(use_kalman_filter=self.config['video_smooth_filter'] ==
+                                                        'kalman', bbox_mavg_coef=self.config.get('bbox_mavg_coef',
+                                                                                                 None))
 
     def swap(self, from_img, swap_all=True):
         """
@@ -52,6 +56,9 @@ class Swapper:
         try:
             from_faces = self.face_detector.detect_faces(from_img)
         except FaceSwapException as e:
+            # reset video converter is we missed a face. Could be a random error or a change or scene
+            if self.video_converter:
+                self.video_converter.reset_state()
             # if specified save original picture also in case of exceptions
             # this guarantees for example that all frames are present
             if self.save_all:
@@ -60,8 +67,14 @@ class Swapper:
             else:
                 raise
 
+        # Log advice in case video smoothing in enabled with a multiple faces video
+        if len(from_faces) > 1 and self.video_converter:
+            logging.info("Multiple faces detected. Suggest to disable video_smooth_filter as it supports only single "
+                         "face videos.")
+
         if swap_all:
-            # one option is to save partial results for each face and pass it as original for next face
+            # in case of multiple faces, one option is to save partial results for each face and pass it as original
+            # for next face
             part_res = from_img
             for face in from_faces:
                 # set previous partial results as img of current face (equivalent to initial img for first face)
@@ -70,7 +83,7 @@ class Swapper:
                                       video_converter=self.video_converter)
             return part_res
         else:
-            # for now just swap first detected face
+            # otherwise for now just swap first face detected
             return swap_faces(from_faces[0], self.face_detector, self.config, self.face_generator,
                               video_converter=self.video_converter)
 
@@ -99,7 +112,6 @@ def swap_faces(from_face: Face, detector: FaceDetector,
     new_face_landmarks = np.array([(x-from_face.rect.left(), y-from_face.rect.top())
                                    for (x, y) in from_face.landmarks])
     new_face = Face(new_face_img)
-    new_face.face_img = new_face_img
     new_face.landmarks = new_face_landmarks
 
     # process and get high-level mask
@@ -130,16 +142,16 @@ def swap_faces(from_face: Face, detector: FaceDetector,
             color_correct_blur_frac = config['color_correct_blur_frac']
 
             # we compute the blur amount to use based on distance between eyes
-            #blur_amount = color_correct_blur_frac * new_face.face_img.shape[0]/2
             blur_amount = color_correct_blur_frac * np.linalg.norm(
                 np.mean(new_face.landmarks[FaceDetector.left_eye], axis=0) -
                 np.mean(from_face.landmarks[FaceDetector.right_eye], axis=0))
 
             # notice that we pass the face images, which need to be of same size
             # for this method to work
-            new_face.img = utils.correct_colours(from_face.face_img, new_face.img, blur_amount)
-            #new_face.img = utils.hist_eq(new_face.img, from_face.face_img)
-            #new_face.img = utils.color_hist_match(new_face.img, from_face.face_img)
+            from_face_img = from_face.get_face_img()
+            new_face.img = utils.correct_colours(from_face_img, new_face.img, blur_amount)
+            #new_face.img = utils.hist_eq(new_face.img, from_face_img)
+            #new_face.img = utils.color_hist_match(new_face.img, from_face_img)
 
 
         # basic insertion with masking
@@ -220,13 +232,28 @@ def main(_=None):
         logging.info("Creating output dir: {}".format(output_path))
         output_path.mkdir()
 
+    # get a valid file from given directory
+    if input_path.is_dir() and not process_images:
+        video_files = image_processing.get_imgs_paths(input_path, img_types=('*.gif', '*.webm', '*.mp4'), as_str=True)
+        if not video_files:
+            logging.error("No valid video files in: {}".format(input_path))
+            sys.exit(1)
+        # for now just pick first one
+        input_path = Path(video_files[0])
+
     with open(str(config_path), 'r') as ymlfile:
         cfg = yaml.load(ymlfile)
 
     face_detector = FaceDetector(cfg)
 
-    # TODO improve check
     model_cfg = cfg[model_name][model_version]
+
+    resize_fun = None
+    if cfg['swap']['use_super_resolution']:
+        sr_model = super_resolution.get_SRResNet(cfg['super_resolution'])
+        resize_fun = lambda img, size: FaceGenerator.super_resolution_resizing(sr_model, img, size)
+
+    # TODO improve check
     # load generators (autoencoder or GAN)
     if "gan" in model_name:
         gen_a, gen_b, _, _ = gan.get_gan(model_cfg, load_discriminators=False)
@@ -241,19 +268,19 @@ def main(_=None):
         gen_fun = lambda x: fun_abgr([np.expand_dims(x, 0)])[0][0]
         face_generator = FaceGenerator.FaceGenerator(
             lambda face_img: FaceGenerator.gan_masked_generate_face(gen_fun, face_img),
-            input_size=gen_input_size, tanh_fix=("gan" in model_name), align=cfg['swap'].get('align'))
+            input_size=gen_input_size, config=cfg['swap'], resize_fun=resize_fun)
 
     # otherwise proceed by simply passing the generator
     else:
         face_generator = FaceGenerator.FaceGenerator(
             lambda face_img: FaceGenerator.aue_generate_face(target_gen, face_img),
-            input_size=gen_input_size, tanh_fix=("gan" in model_name), align=cfg['swap'].get('align'))
+            input_size=gen_input_size, config=cfg['swap'], resize_fun=resize_fun)
 
     swapper = Swapper(face_detector, face_generator, cfg['swap'], save_all=save_all)
 
     # process directly a video
     if not process_images:
-        logging.info("Starting Face Swap over video with face generation")
+        logging.info("Running Face Swap over video with face generation")
         try:
             frame_edit_fun = lambda x: swapper.swap(x)
             video_utils.convert_video_to_video(str(input_path), str(output_path),
@@ -267,7 +294,7 @@ def main(_=None):
         from_img_paths = image_processing.get_imgs_paths(input_path, as_str=False)
 
         # iterate over all collected image paths
-        logging.info("Starting Face Swap over images with face generation")
+        logging.info("Running Face Swap over images with face generation")
         for from_face in tqdm(from_img_paths):
             from_filename = from_face.name
             #logging.debug("## From {}".format(from_filename))

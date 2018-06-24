@@ -29,7 +29,8 @@ def get_face_mask(face: Face, mask_type,
         # or re-detect face from aligned image, and get mask then
         mask = get_hull_mask(face, 255)
     elif mask_type == 'rect':
-        mask = np.zeros(face.face_img.shape, dtype=face.face_img.dtype)+255
+        face_img = face.get_face_img()
+        mask = np.zeros(face_img.shape, dtype=face_img.dtype)+255
     else:
         logging.error("No such mask type: {}".format(mask_type))
         raise Exception("No such mask type: {}".format(mask_type))
@@ -162,7 +163,7 @@ def align_face(from_face: Face, to_face: Face=None):
     if to_face is None:
         to_face = from_face
 
-    size = to_face.face_img.shape[:2][::-1]
+    size = to_face.get_face_img().shape[:2][::-1]
     print(align_matrix)
     #align_matrix = align_matrix * (size[1] - 2 * 48)
     #align_matrix = align_matrix * (size[1] - 2 * 48)

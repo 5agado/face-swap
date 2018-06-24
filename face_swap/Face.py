@@ -1,14 +1,16 @@
+import dlib
+
+
 class Face:
-    def __init__(self, img=None, face_img=None, rect=None):
+    # TODO option of major refactoring around having custom rect instead of dlib one
+    def __init__(self, img=None, rect=None):
         """
         Utility class for a face
         :param img: image containing the face
-        :param face_img: image bounded to target face (can be the same as img)
         :param rect: dlib face rectangle
         """
         self.img = img
         self.rect = rect
-        self.face_img = face_img
         self.landmarks = None
 
     def get_face_center(self, absolute=True):
@@ -26,12 +28,44 @@ class Face:
                 y += top
             return x, y
 
+    def get_face_img(self):
+        """
+        Return image bounded to target face (boundary is defined by rect attribute)
+        :return:
+        """
+        top, right, bottom, left = (self.rect.top(), self.rect.right(), self.rect.bottom(), self.rect.left())
+        face_img = self.img[top:bottom, left:right]
+        return face_img
+
     def get_face_size(self):
         """
-        Return size face as (width, height)
+        Return size of face as (width, height)
         :return: (w, h)
         """
         top, right, bottom, left = (self.rect.top(), self.rect.right(), self.rect.bottom(), self.rect.left())
         w = right - left
         h = bottom - top
         return w, h
+
+    def expand_face_boundary(self, border_expand: tuple):
+        face_size = self.get_face_size()
+        img_size = self.img.shape
+        # if float given, consider as expansion ratio and obtain equivalent int values
+        if type(border_expand[0]) == float:
+            border_expand = (int(border_expand[0] * face_size[0]),
+                             int(border_expand[1] * face_size[1]))
+
+        border_expand = (border_expand[0]//2, border_expand[1]//2)
+
+        top, right, bottom, left = (self.rect.top(), self.rect.right(), self.rect.bottom(), self.rect.left())
+        x, y = left, top
+        w = right - left
+        h = bottom - top
+        new_top = max(0, y - border_expand[1])
+        new_bottom = min(img_size[0], y + h + border_expand[1])
+        new_left = max(0, x - border_expand[0])
+        new_right = min(img_size[1], x + w + border_expand[0])
+
+        self.rect = dlib.rectangle(left=new_left, top=new_top,
+                                   right=new_right, bottom=new_bottom)
+

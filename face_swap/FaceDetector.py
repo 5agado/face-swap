@@ -43,9 +43,9 @@ class FaceDetector:
         self.predictor = dlib.shape_predictor(config.get('shape_predictor_path'))
 
     def _mtcnn_detect_faces(self, img):
-        face_confidence_threshold = 0.9
+        face_confidence_threshold = self.config['mtcnn_confidence_threshold']
         rects = self.detector.detect_faces(img)
-        faces = [Face(img.copy(), None,
+        faces = [Face(img.copy(),
                       # output bbox coordinate of MTCNN is [x, y, width, height]
                       # need to max to 0 cause sometimes bbox has negative values ??library BUG
                       dlib.rectangle(left=max(r['box'][0], 0), top=max(r['box'][1], 0),
@@ -63,17 +63,12 @@ class FaceDetector:
             # if using custom detector we need to extract get the rect attribute
             if self.detector_model_path:
                 rects = [r.rect for r in rects]
-            faces = [Face(img.copy(), None, r) for r in rects]
+            faces = [Face(img.copy(), r) for r in rects]
 
         # continue only if we detected at least one face
         if len(faces) == 0:
             logging.debug("No face detected")
             raise FaceSwapException("No face detected.")
-        for f in faces:
-            # border expansion causes error during swap process
-            f.face_img = self._extract_face(f, out_size=None,
-                                            border_expand=(0, 0),  #self.config['extract']['border_expand'],
-                                            align=False)
         return faces
 
     def get_landmarks(self, face: Face, recompute=False):
@@ -116,12 +111,15 @@ class FaceDetector:
                                   maintain_proportion=maintain_proportion,
                                   masked=masked)
 
-    def _extract_face(self, face: Face, out_size=None, border_expand=(0, 0), align=False,
+    def _extract_face(self, face: Face, out_size=None, border_expand=(0., 0.), align=False,
                       maintain_proportion=False, masked=False):
+        face_size = face.get_face_size()
+        border_expand = (int(border_expand[0]*face_size[0]), int(border_expand[1]*face_size[1]))
+
         # if not specified otherwise, we want to make sure extracted face size
         # is exactly as input face size
         if not out_size:
-            out_size = face.get_face_size()
+            out_size = face_size
 
         face.landmarks = self.get_landmarks(face)
         if masked:
@@ -132,23 +130,20 @@ class FaceDetector:
                                        blur_size=int(self.config['extract']['blur_size']))
             # black all pixels outside the mask
             face.img = cv2.bitwise_and(face.img, face.img, mask=mask[:, :, 1])
+
+        # keep proportions of original image (rect) for extracted image, otherwise resize might stretch the content
+        if maintain_proportion:
+            border_delta = self._get_maintain_proportion_delta(face_size, out_size)
+            border_expand = (border_expand[0] + int(border_delta[0]//2), border_expand[1] + int(border_delta[1]//2))
+
+        face.expand_face_boundary(border_expand)
+
         if align:
             # cut_face = utils.align_face(face, None)
             cut_face = utils._align_face(face, size=out_size)
         else:
-            # keep proportions of original image (rect) for extracted image, otherwise resize might stretch the content
-            if maintain_proportion:
-                border_delta = self._get_maintain_proportion_delta(face.get_face_size(), out_size)
-                print(face.get_face_size())
-                border_expand = (border_expand[0] + int(border_delta[0]//2), border_expand[1] + int(border_delta[1]//2))
-            top, right, bottom, left = (face.rect.top(), face.rect.right(), face.rect.bottom(), face.rect.left())
-            x, y = left, top
-            w = right - left
-            h = bottom - top
-            cut_face = face.img[max(0, y-border_expand[1]): y + h + border_expand[1],
-                                max(0, x-border_expand[0]): x + w + border_expand[0]]
+            cut_face = cv2.resize(face.get_face_img(), out_size, interpolation=cv2.INTER_CUBIC)
 
-        cut_face = cv2.resize(cut_face, out_size, interpolation=cv2.INTER_CUBIC)
         return cut_face
 
     def _get_maintain_proportion_delta(self, src_size, dest_size):
@@ -161,7 +156,6 @@ class FaceDetector:
         :return:
         """
         dest_ratio = max(dest_size) / min(dest_size)
-        print(dest_ratio)
         delta_h = delta_w = 0
         w, h = src_size
         if w > h:

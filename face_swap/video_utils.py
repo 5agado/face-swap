@@ -1,6 +1,7 @@
 from os.path import join
 import numpy as np
 import cv2
+from tqdm import tqdm
 
 from face_swap.Face import Face
 
@@ -24,14 +25,23 @@ def convert_video_to_video(video_path: str, out_path: str, frame_edit_fun,
     out = cv2.VideoWriter(out_path, fourcc, fps, size)
 
     # Process frame by frame
-    #TODO would be good to have an hint on progress percentage
-    while input_video.isOpened():
-        ret, frame = input_video.read()
-        if ret == True:
+
+    # some codecs don't support this, so in such cases we need to rollback to base looping
+    nb_frames = int(input_video.get(cv2.CAP_PROP_FRAME_COUNT))
+    if nb_frames and nb_frames > 0:
+        for _ in tqdm(range(nb_frames)):
+            _, frame = input_video.read()
+
             frame = frame_edit_fun(frame)
             out.write(frame)
-        else:
-            break
+    else:
+        while input_video.isOpened():
+            ret, frame = input_video.read()
+            if ret:
+                frame = frame_edit_fun(frame)
+                out.write(frame)
+            else:
+                break
 
     # Release everything if job is finished
     input_video.release()
@@ -39,22 +49,32 @@ def convert_video_to_video(video_path: str, out_path: str, frame_edit_fun,
 
 
 class VideoConverter:
-    def __init__(self, use_kalman_filter=False):
+    def __init__(self, use_kalman_filter=False, bbox_mavg_coef=0.35):
+        self.use_kalman_filter = use_kalman_filter
         if use_kalman_filter:
-            self.bbox_mavg_coef = None
             self.noise_coef = 5e-3  # Increase by 10x if tracking is slow.
             self.kf0 = kalmanfilter_init(self.noise_coef)
             self.kf1 = kalmanfilter_init(self.noise_coef)
-        else:
-            self.bbox_mavg_coef = 0.35
 
+        self.bbox_mavg_coef = bbox_mavg_coef
         self.prev_coords = (0, 0, 0, 0)
         self.frames = 0
+        self.reset_state = True
+
+    def reset(self):
+        if not self.reset_state:
+            if self.use_kalman_filter:
+                self.kf0 = kalmanfilter_init(self.noise_coef)
+                self.kf1 = kalmanfilter_init(self.noise_coef)
+            self.prev_coords = (0, 0, 0, 0)
+            self.frames = 0
+            self.reset_state = True
 
     def get_center(self, face: Face):
         rect = face.rect
         coords = (rect.left(), rect.right(), rect.top(), rect.bottom())
 
+        # adjust coords only if we have previous valid values
         if self.frames != 0:
             coords = self.get_smoothed_coord(coords, face.img.shape)
             self.prev_coords = coords
@@ -67,9 +87,9 @@ class VideoConverter:
 
     def get_smoothed_coord(self, coords: tuple, shape):
         # simply rely on moving average
-        if self.bbox_mavg_coef:
+        if not self.use_kalman_filter:
             coords = tuple([
-                # adjust each coordinate based on coefficies and prev coordinate
+                # adjust each coordinate based on coefficients and prev coordinate
                 int(self.bbox_mavg_coef * prev_coord + (1 - self.bbox_mavg_coef) * curr_coord)
                 for curr_coord, prev_coord in zip(coords, self.prev_coords)
             ])

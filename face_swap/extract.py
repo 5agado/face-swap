@@ -6,6 +6,8 @@ import cv2
 import yaml
 from tqdm import tqdm
 import logging
+import tensorflow as tf
+tf.logging.set_verbosity(tf.logging.ERROR)
 
 # data-science-utils
 from utils import image_processing
@@ -46,6 +48,15 @@ def main(_=None):
         logging.info("No such config file: {}".format(config_path))
         sys.exit(1)
 
+    # get a valid file from given directory
+    if input_path.is_dir():
+        video_files = image_processing.get_imgs_paths(input_path, img_types=('*.gif', '*.webm', '*.mp4'), as_str=True)
+        if not video_files:
+            logging.error("No valid video files in: {}".format(input_path))
+            sys.exit(1)
+        # for now just pick first one
+        input_path = Path(video_files[0])
+
     with open(str(config_path), 'r') as ymlfile:
         cfg = yaml.load(ymlfile)
 
@@ -56,7 +67,7 @@ def main(_=None):
     # "Load" input video
     input_video = cv2.VideoCapture(str(input_path))
 
-    logging.info("Starting Face Extraction over video")
+    logging.info("Running Face Extraction over video")
     # Process frame by frame
     # TODO would be good to have an hint on progress percentage
     while input_video.isOpened():
