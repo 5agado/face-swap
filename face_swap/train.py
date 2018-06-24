@@ -39,7 +39,8 @@ def get_original_data(a_images_path, b_images_path, img_size=(256, 256),
 # TODO better batching mechanism
 # use yield and exhaustive run over data before reshuffling
 # ??also option of loading images here instead of all at start (and get list of paths instead)
-def get_training_data(images, batch_size, config):
+# TODO more explicit relation between warp multiplication factor and training images input size
+def get_training_data(images, batch_size, config, warp_mult_factor=1):
     warped_images = []
     target_images = []
 
@@ -47,7 +48,7 @@ def get_training_data(images, batch_size, config):
     for index in indexes:
         image = images[index]
         image = FaceGenerator.random_transform(image, **config['random_transform'])
-        warped_img, target_img = FaceGenerator.random_warp(image)
+        warped_img, target_img = FaceGenerator.random_warp(image, mult_f=warp_mult_factor)
 
         warped_images.append(warped_img)
         target_images.append(target_img)
