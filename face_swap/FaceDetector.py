@@ -48,7 +48,7 @@ class FaceDetector:
         faces = [Face(img.copy(),
                       # output bbox coordinate of MTCNN is [x, y, width, height]
                       # need to max to 0 cause sometimes bbox has negative values ??library BUG
-                      dlib.rectangle(left=max(r['box'][0], 0), top=max(r['box'][1], 0),
+                      Face.Rectangle(left=max(r['box'][0], 0), top=max(r['box'][1], 0),
                                      right=max(r['box'][0], 0) + max(r['box'][2], 0),
                                      bottom=max(r['box'][1], 0) + max(r['box'][3], 0)))
                  for r in rects if r['confidence'] > face_confidence_threshold]
@@ -60,10 +60,11 @@ class FaceDetector:
             faces = self._mtcnn_detect_faces(img)
         else:
             rects = self.detector(img, 1)
-            # if using custom detector we need to extract get the rect attribute
+            # if using custom detector we need to get the rect attribute
             if self.detector_model_path:
                 rects = [r.rect for r in rects]
-            faces = [Face(img.copy(), r) for r in rects]
+            faces = [Face(img.copy(), Face.Rectangle(top=r.top(), right=r.right(),
+                                                     bottom=r.bottom(), left=r.left())) for r in rects]
 
         # continue only if we detected at least one face
         if len(faces) == 0:
@@ -76,12 +77,11 @@ class FaceDetector:
         if face.landmarks is not None and not recompute:
             return face.landmarks
         else:
-            shape = self.predictor(face.img, face.rect)
+            # we need a dlib rectangle to get the landmarks
+            dlib_rect = dlib.rectangle(left=face.rect.left, top=face.rect.top,
+                                       right=face.rect.right, bottom=face.rect.bottom)
+            shape = self.predictor(face.img, dlib_rect)
             return np.array([(p.x, p.y) for p in shape.parts()])
-
-    def get_contour(self, face: Face):
-        shape = self.predictor(face.img, face.rect)
-        return self.get_contour_points(shape)
 
     @staticmethod
     def get_eyes(face: Face):

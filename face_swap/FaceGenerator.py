@@ -3,6 +3,8 @@ import numpy as np
 from skimage.transform._geometric import _umeyama
 from ast import literal_eval
 
+import logging
+
 from face_swap.Face import Face
 import face_swap.faceswap_utils as utils
 
@@ -179,7 +181,7 @@ def random_warp(img, mult_f=1):
 def super_resolution_resizing(sr_model, lr_img, dest_size):
     SIZE_DIFF_THRESHOLD = 50
     sr_model_out_size = sr_model.output_shape[1:3]
-    lr_img_size = lr_img.input_shape[0:2]
+    lr_img_size = lr_img.shape[0:2]
     img_to_resize = lr_img
     # use sr only if necessary
     # notice that for now sr_model_input_img_size should be the same as lr_img_size
@@ -189,7 +191,7 @@ def super_resolution_resizing(sr_model, lr_img, dest_size):
         hr_image = np.clip(hr_image * 255, 0, 255).astype(np.uint8)
         img_to_resize = hr_image
     else:
-        print("Not using super res. lr_img_size {} - dst_size {}".format(lr_img_size, dest_size))
+        logging.debug("Not using super res. lr_img_size {} - dst_size {}".format(lr_img_size, dest_size))
     res_img = cv2.resize(img_to_resize, dest_size,
                           interpolation=cv2.INTER_CUBIC)
     return res_img

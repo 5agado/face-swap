@@ -58,7 +58,7 @@ class Swapper:
         except FaceSwapException as e:
             # reset video converter is we missed a face. Could be a random error or a change or scene
             if self.video_converter:
-                self.video_converter.reset_state()
+                self.video_converter.reset()
             # if specified save original picture also in case of exceptions
             # this guarantees for example that all frames are present
             if self.save_all:
@@ -109,7 +109,7 @@ def swap_faces(from_face: Face, detector: FaceDetector,
     new_face_img, gen_mask = generator.generate(from_face)
     #return new_face_img
 
-    new_face_landmarks = np.array([(x-from_face.rect.left(), y-from_face.rect.top())
+    new_face_landmarks = np.array([(x-from_face.rect.left, y-from_face.rect.top)
                                    for (x, y) in from_face.landmarks])
     new_face = Face(new_face_img)
     new_face.landmarks = new_face_landmarks
@@ -172,10 +172,9 @@ def _get_mask(config, from_face: Face, gen_mask=None):
                                         blur_size=config.get('blur_size', None))
 
         # TODO refactor to method
-        top, right, bottom, left = (from_face.rect.top(), from_face.rect.right(), from_face.rect.bottom(), from_face.rect.left())
+        top, right, bottom, left = from_face.rect.get_coords()
         x, y = left, top
-        w = right - left
-        h = bottom - top
+        w, h = from_face.get_face_size()
         border_expand = (0, 0)
         face_mask = face_mask[max(0, y - border_expand[1]): y + h + border_expand[1],
                    max(0, x - border_expand[0]): x + w + border_expand[0], :]
@@ -234,7 +233,7 @@ def main(_=None):
 
     # get a valid file from given directory
     if input_path.is_dir() and not process_images:
-        video_files = image_processing.get_imgs_paths(input_path, img_types=('*.gif', '*.webm', '*.mp4'), as_str=True)
+        video_files = image_processing.get_imgs_paths(input_path, img_types=('*.gif', '*.webm', '*.mp4', '*.mov'), as_str=True)
         if not video_files:
             logging.error("No valid video files in: {}".format(input_path))
             sys.exit(1)

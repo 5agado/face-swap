@@ -71,8 +71,7 @@ class VideoConverter:
             self.reset_state = True
 
     def get_center(self, face: Face):
-        rect = face.rect
-        coords = (rect.left(), rect.right(), rect.top(), rect.bottom())
+        coords = face.rect.get_coords()
 
         # adjust coords only if we have previous valid values
         if self.frames != 0:
@@ -82,7 +81,7 @@ class VideoConverter:
             self.prev_coords = coords
             _ = self.get_smoothed_coord(coords, face.img.shape)
         self.frames += 1
-        left, right, top, bottom = coords
+        top, right, bottom, left = coords
         return left + (right - left) // 2, top + (bottom - top) // 2
 
     def get_smoothed_coord(self, coords: tuple, shape):

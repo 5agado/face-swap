@@ -3,7 +3,7 @@ A set of tools and utils to operate face swapping and explore creative usage of 
 
 ## Setup
 
-Install via
+Install via (requires python > 3.4)
 
     python setup.py [develop]
 
@@ -71,7 +71,6 @@ Start image and exec bash
 
 # TODO
 * align face -> feed to generator -> detect face in generated image -> align back using landmarks
-* try 128 input (also good to test if all methods are generic)
 * log some stats (frames w w/o faces, faces size, conversion size, execution time of operations)
 
 # License

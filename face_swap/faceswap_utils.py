@@ -146,7 +146,7 @@ def get_align_matrix(from_face: Face, to_face: Face=None):
         return _umeyama(to_face.landmarks, from_face.landmarks, True)[:2]
     else:
 
-        from_face_landmarks = np.array([(x - from_face.rect.left(), y - from_face.rect.top())
+        from_face_landmarks = np.array([(x - from_face.rect.left, y - from_face.rect.top)
                                         for (x, y) in from_face.landmarks])
         # need to resize default ones to match given head size
         (w, h) = from_face.img.shape[:2]
@@ -184,8 +184,7 @@ def _align_face(face: Face, desired_lx_eye=(0.35, 0.35), size=None):
     if size:
         desired_face_width, desired_face_height = size
     else:
-        desired_face_width = face.rect.right() - face.rect.left()
-        desired_face_height = face.rect.bottom() - face.rect.top()
+        desired_face_width, desired_face_height = face.get_face_size()
 
     eyes_center, angle, scale = get_rotation_info(face, desired_face_width, desired_lx_eye)
 
@@ -212,7 +211,7 @@ def get_rotation_info(face: Face, desired_face_width=None, desired_lx_eye=(0.35,
     lx_eye, rx_eye = FaceDetector.get_eyes(face)
 
     if not desired_face_width:
-        desired_face_width = face.rect.right() - face.rect.left()
+        desired_face_width, _ = face.get_face_size()
 
     # compute eye centroids
     lx_eye_center = lx_eye.mean(axis=0).astype("int")
