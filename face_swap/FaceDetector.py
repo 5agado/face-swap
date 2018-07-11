@@ -2,6 +2,7 @@ import logging
 from ast import literal_eval
 
 import cv2
+import copy
 import dlib
 import numpy as np
 
@@ -63,13 +64,17 @@ class FaceDetector:
             # if using custom detector we need to get the rect attribute
             if self.detector_model_path:
                 rects = [r.rect for r in rects]
-            faces = [Face(img.copy(), Face.Rectangle(top=r.top(), right=r.right(),
-                                                     bottom=r.bottom(), left=r.left())) for r in rects]
+            faces = [Face(img.copy(), Face.Rectangle(top=max(r.top(), 0), right=max(r.right(), 0),
+                                                     bottom=max(r.bottom(), 0), left=max(r.left(), 0))) for r in rects]
 
         # continue only if we detected at least one face
         if len(faces) == 0:
             logging.debug("No face detected")
             raise FaceSwapException("No face detected.")
+
+        for face in faces:
+            face.landmarks = self.get_landmarks(face)
+
         return faces
 
     def get_landmarks(self, face: Face, recompute=False):
@@ -99,8 +104,12 @@ class FaceDetector:
         return face_boundary, shape.rect
 
     def extract_face(self, face: Face):
-        # size is a tuple, so need to eval from string
-        # representation in config
+        """
+        Utility method which uses directly the current detector configuration for the generic extraction operation
+        :param face:
+        :return:
+        """
+        # size is a tuple, so need to eval from string representation in config
         size = literal_eval(self.config['extract']['size'])
         border_expand = literal_eval(self.config['extract']['border_expand'])
         align = self.config['extract']['align']
@@ -108,16 +117,14 @@ class FaceDetector:
         masked = self.config['extract']['masked']
 
         return self._extract_face(face, size, border_expand=border_expand, align=align,
-                                  maintain_proportion=maintain_proportion,
-                                  masked=masked)
+                                  maintain_proportion=maintain_proportion, masked=masked)
 
     def _extract_face(self, face: Face, out_size=None, border_expand=(0., 0.), align=False,
                       maintain_proportion=False, masked=False):
         face_size = face.get_face_size()
         border_expand = (int(border_expand[0]*face_size[0]), int(border_expand[1]*face_size[1]))
 
-        # if not specified otherwise, we want to make sure extracted face size
-        # is exactly as input face size
+        # if not specified otherwise, we want extracted face size to be exactly as input face size
         if not out_size:
             out_size = face_size
 
@@ -136,11 +143,9 @@ class FaceDetector:
             border_delta = self._get_maintain_proportion_delta(face_size, out_size)
             border_expand = (border_expand[0] + int(border_delta[0]//2), border_expand[1] + int(border_delta[1]//2))
 
-        face.expand_face_boundary(border_expand)
-
         if align:
-            # cut_face = utils.align_face(face, None)
-            cut_face = utils._align_face(face, size=out_size)
+            cut_face, _ = utils.align_face(face, boundary_resize_factor=border_expand)
+            #cut_face = utils._align_face(face, size=out_size)
         else:
             cut_face = cv2.resize(face.get_face_img(), out_size, interpolation=cv2.INTER_CUBIC)
 

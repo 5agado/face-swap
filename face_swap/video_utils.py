@@ -75,16 +75,16 @@ class VideoConverter:
 
         # adjust coords only if we have previous valid values
         if self.frames != 0:
-            coords = self.get_smoothed_coord(coords, face.img.shape)
+            coords = self._get_smoothed_coord(coords, face.img.shape)
             self.prev_coords = coords
         else:
             self.prev_coords = coords
-            _ = self.get_smoothed_coord(coords, face.img.shape)
+            _ = self._get_smoothed_coord(coords, face.img.shape)
         self.frames += 1
         top, right, bottom, left = coords
         return left + (right - left) // 2, top + (bottom - top) // 2
 
-    def get_smoothed_coord(self, coords: tuple, shape):
+    def _get_smoothed_coord(self, coords: tuple, shape):
         # simply rely on moving average
         if not self.use_kalman_filter:
             coords = tuple([

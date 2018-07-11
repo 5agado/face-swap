@@ -114,10 +114,6 @@ def swap_faces(from_face: Face, detector: FaceDetector,
     new_face = Face(new_face_img)
     new_face.landmarks = new_face_landmarks
 
-    # process and get high-level mask
-    mask = _get_mask(config, from_face, gen_mask)
-    #return mask
-
     # obtain destination face center (absolute to whole image)
     # if define, we rely on a video converter to smooth
     # the center based on previous frames
@@ -129,6 +125,21 @@ def swap_faces(from_face: Face, detector: FaceDetector,
         center = from_face.get_face_center()
     #cv2.circle(from_face.img, center, 5, (255, 0, 0), -1)
     #return from_face.img
+
+    # process and get high-level mask
+    mask_w, mask_h = from_face.get_face_size()
+    mask_border_expand = literal_eval(config['mask_border_expand'])
+    # if float given, consider as expansion ratio and obtain equivalent int values
+    if type(mask_border_expand[0]) == float:
+        mask_border_expand = (int(mask_border_expand[0] * mask_w), int(mask_border_expand[1] * mask_h))
+    max_expansion_w = center[0] - mask_w//2
+    max_expansion_h = center[1] - mask_h//2
+    mask_border_expand = (min(max_expansion_w, mask_border_expand[0]), min(max_expansion_h, mask_border_expand[1]))
+    mask = _get_mask(config, from_face, gen_mask, border_expand=mask_border_expand)
+    # expand border of image as much as done for mask
+    new_face.img = cv2.copyMakeBorder(new_face.img, top=mask_border_expand[1], bottom=mask_border_expand[1],
+                                      left=mask_border_expand[0], right=mask_border_expand[0],
+                                      borderType=cv2.BORDER_REFLECT)
 
     # merge from and to faces via the specified method
     if config.get('seamless_clone'):
@@ -149,10 +160,9 @@ def swap_faces(from_face: Face, detector: FaceDetector,
             # notice that we pass the face images, which need to be of same size
             # for this method to work
             from_face_img = from_face.get_face_img()
-            new_face.img = utils.correct_colours(from_face_img, new_face.img, blur_amount)
-            #new_face.img = utils.hist_eq(new_face.img, from_face_img)
-            #new_face.img = utils.color_hist_match(new_face.img, from_face_img)
-
+            #new_face.img = utils.correct_colours(from_face_img, new_face.img, blur_amount)
+            #new_face.img = utils.hist_eq(new_face.img, from_face_img)  # possible worst method
+            new_face.img = utils.color_hist_match(new_face.img, from_face_img)
 
         # basic insertion with masking
         res = utils.insert_image_in(new_face.img, from_face.img, center, mask)
@@ -160,7 +170,7 @@ def swap_faces(from_face: Face, detector: FaceDetector,
     return res
 
 
-def _get_mask(config, from_face: Face, gen_mask=None):
+def _get_mask(config, from_face: Face, gen_mask=None, border_expand=(0, 0)):
     mask_method = config.get('mask_method', 'face_mask')
     # if we didn't get a mask directly from the generator, compute it from the face
     if gen_mask is None or mask_method == 'mix_mask' or mask_method == 'face_mask':
@@ -171,24 +181,22 @@ def _get_mask(config, from_face: Face, gen_mask=None):
                                         erosion_size=literal_eval(config.get('erosion_size', None)),
                                         blur_size=config.get('blur_size', None))
 
-        # TODO refactor to method
         top, right, bottom, left = from_face.rect.get_coords()
-        x, y = left, top
-        w, h = from_face.get_face_size()
-        border_expand = (0, 0)
-        face_mask = face_mask[max(0, y - border_expand[1]): y + h + border_expand[1],
-                   max(0, x - border_expand[0]): x + w + border_expand[0], :]
+        face_mask = face_mask[max(0, top - border_expand[1]): bottom + border_expand[1],
+                              max(0, left - border_expand[0]): right + border_expand[0], :]
 
         if gen_mask is not None and mask_method == 'mix_mask':
             mask = np.clip(face_mask + gen_mask, 0, 255)
         else:
             mask = face_mask
     else:
+        mask = cv2.copyMakeBorder(gen_mask, top=border_expand[1], bottom=border_expand[1],
+                                  left=border_expand[0], right=border_expand[0],
+                                  borderType=cv2.BORDER_CONSTANT, value=[0, 0, 0])
         if mask_method == 'gen_mask_fix':
             blur_size = config.get('blur_size', 1)
-            mask = cv2.blur(gen_mask, (blur_size, blur_size))
-        else:
-            mask = gen_mask
+            #mask = cv2.blur(mask, (blur_size, blur_size))
+            mask = cv2.medianBlur(mask, blur_size)  # highly effective against salt-and-pepper noise
     return mask
 
 
@@ -208,7 +216,7 @@ def main(_=None):
                         default='base_autoencoder')
     parser.add_argument('-model_version', metavar='model_version', dest='model_version',
                         default='v1')
-    parser.add_argument('-process_images', dest='process_images', action='store_true')
+    parser.add_argument('--process_images', dest='process_images', action='store_true')
     parser.set_defaults(process_images=False)
     parser.add_argument('-v', dest='verbose', action='store_true')
     parser.set_defaults(verbose=False)

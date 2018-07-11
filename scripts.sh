@@ -59,7 +59,7 @@ then
     # Process video automatically picked up from the workdir
     deep_swap -i ${WORKDIR} -o ${WORKDIR}/test_out_gifs/out_$(date +%s).mp4 -A -model_name masked_gan -model_version v1
     # Process frames from the given folder and generate video from out folder
-    #deep_swap -i ${WORKDIR}/frames/ -o ${WORKDIR}/out/ -A -model_name masked_gan -model_version v1 -process_images
+    #deep_swap -i ${WORKDIR}/frames/ -o ${WORKDIR}/out/ -A -model_name masked_gan -model_version v1 --process_images
     #ffmpeg -hide_banner -framerate ${FRAMERATE} -i ${WORKDIR}/out/frame_%04d.png ${WORKDIR}/test_out_gifs/out_$(date +%s).gif
     exit 0
 fi

@@ -98,16 +98,15 @@ def insert_image_in(src_img, target_image, center, mask):
     x1 = max(0, center[0] - src_img.shape[1] // 2)
     x2 = x1 + src_img.shape[1]
 
-    for c in range(0, 3):
-        # need to check how much I can cover on the destination
-        # and make sure source is same size, otherwise throws
-        # exception
-        dest_shape = res[y1:y2, x1:x2, c].shape[:2]
+    # need to check how much I can cover on the destination
+    # and make sure source is same size, otherwise throws
+    # exception
+    dest_shape = res[y1:y2, x1:x2, :].shape[:2]
 
-        alpha_s = mask[:dest_shape[0], :dest_shape[1], c] / 255.0
-        alpha_l = 1.0 - alpha_s
-        res[y1:y2, x1:x2, c] = (alpha_s * src_img[:dest_shape[0], :dest_shape[1], c] +
-                                alpha_l * res[y1:y2, x1:x2, c])
+    alpha_s = mask[:dest_shape[0], :dest_shape[1], :] / 255.0
+    alpha_l = 1.0 - alpha_s
+    res[y1:y2, x1:x2, :] = (alpha_s * src_img[:dest_shape[0], :dest_shape[1], :] +
+                            alpha_l * res[y1:y2, x1:x2, :])
 
     return res
 
@@ -135,112 +134,52 @@ mean_face_y = np.array([
 default_landmarks_2D = np.stack([mean_face_x, mean_face_y], axis=1)
 
 
-def get_align_matrix(from_face: Face, to_face: Face=None):
-    # other implementation option see
-    # https://matthewearl.github.io/2015/07/28/switching-eds-with-python/
+# other implementation option see
+# https://matthewearl.github.io/2015/07/28/switching-eds-with-python/
+def align_face(face, boundary_resize_factor=None, invert=False, img=None):
 
-    # TODO check why only 51 landmarks for default aligned face
-    # also why specific order for given landmarks
-
-    if to_face:
-        return _umeyama(to_face.landmarks, from_face.landmarks, True)[:2]
+    if img is None:
+        face_img = face.get_face_img(boundary_resize_factor=boundary_resize_factor)
     else:
+        face_img = img
+    src_landmarks = np.array([(x - face.rect.left, y - face.rect.top) for (x, y) in face.landmarks])
 
-        from_face_landmarks = np.array([(x - from_face.rect.left, y - from_face.rect.top)
-                                        for (x, y) in from_face.landmarks])
-        # need to resize default ones to match given head size
-        (w, h) = from_face.img.shape[:2]
-        scaled_default_landmarks = default_landmarks_2D * np.array([w, h])
-        # default aligned face has only 51 landmarks, so we remove
-        # first 17 from the given one in order to align
-        return _umeyama(scaled_default_landmarks, from_face_landmarks[17:], True)[:2]
+    # need to resize default ones to match given head size
+    (w, h) = face.get_face_size()
+    translation = None
+    if boundary_resize_factor:
+        img_w, img_h = face_img.shape[:2][::-1]
+        translation = (img_w - w, img_h - h)
+        #w += translation[0]
+        #h += translation[1]
+    # w/1.5 h/1.5
+    scaled_default_landmarks = np.array([(int(x * w), int(y * h)) for (x, y) in default_landmarks_2D])
+    # default aligned face has only 51 landmarks, so we remove
+    # first 17 from the given one in order to align
+    src_landmarks = src_landmarks[17:]
+    target_landmarks = scaled_default_landmarks
 
-
-def align_face(from_face: Face, to_face: Face=None):
-    # TODO check why first to and then from so that it works as expected
-    align_matrix = get_align_matrix(from_face, to_face)
-
-    if to_face is None:
-        to_face = from_face
-
-    size = to_face.get_face_img().shape[:2][::-1]
-    print(align_matrix)
-    #align_matrix = align_matrix * (size[1] - 2 * 48)
-    #align_matrix = align_matrix * (size[1] - 2 * 48)
-    align_matrix[:, 2] += 48
-
-    from_image_aligned = cv2.warpAffine(from_face.img,
-                                        align_matrix,
-                                        size,
-                                        dst=np.ones(to_face.img.shape,
-                                                    dtype=to_face.img.dtype) * 255,
-                                        borderMode=cv2.BORDER_TRANSPARENT,
-                                        flags=cv2.WARP_INVERSE_MAP)
-
-    return from_image_aligned
-
-
-def _align_face(face: Face, desired_lx_eye=(0.35, 0.35), size=None):
-    if size:
-        desired_face_width, desired_face_height = size
+    if invert:
+        align_matrix = get_align_matrix(target_landmarks, src_landmarks, translation)
     else:
-        desired_face_width, desired_face_height = face.get_face_size()
+        align_matrix = get_align_matrix(src_landmarks, target_landmarks, translation)
 
-    eyes_center, angle, scale = get_rotation_info(face, desired_face_width, desired_lx_eye)
+    aligned_img = cv2.warpAffine(face_img,
+                                 align_matrix,
+                                 (w, h),
+                                 borderMode=cv2.BORDER_REPLICATE)
 
-    # grab the rotation matrix for rotating and scaling the face
-    M = cv2.getRotationMatrix2D(eyes_center, angle, scale)
-
-    # update the translation component of the matrix
-    tX = desired_face_width * 0.5
-    tY = desired_face_height * desired_lx_eye[1]
-    M[0, 2] += (tX - eyes_center[0])
-    M[1, 2] += (tY - eyes_center[1])
-
-    #print(M)
-
-    # apply the affine transformation
-    (w, h) = (desired_face_width, desired_face_height)
-    output = cv2.warpAffine(face.img, M, (w, h),
-                            flags=cv2.INTER_CUBIC)
-    return output
+    return aligned_img, align_matrix
 
 
-def get_rotation_info(face: Face, desired_face_width=None, desired_lx_eye=(0.35, 0.35)):
-    from face_swap.FaceDetector import FaceDetector
-    lx_eye, rx_eye = FaceDetector.get_eyes(face)
+def get_align_matrix(src_landmarks, target_landmarks, translation: tuple = None):
+    align_matrix = _umeyama(src_landmarks, target_landmarks, True)[:2]
 
-    if not desired_face_width:
-        desired_face_width, _ = face.get_face_size()
+    if translation:
+        align_matrix[0, 2] -= translation[0]//2
+        align_matrix[1, 2] -= translation[1]//2
 
-    # compute eye centroids
-    lx_eye_center = lx_eye.mean(axis=0).astype("int")
-    rx_eye_center = rx_eye.mean(axis=0).astype("int")
-
-    # compute the angle between the eye centroids
-    dY = rx_eye_center[1] - lx_eye_center[1]
-    dX = rx_eye_center[0] - lx_eye_center[0]
-    angle = np.degrees(np.arctan2(dY, dX)) - 180
-
-    # compute the desired right eye x-coordinate based on the
-    # desired x-coordinate of the left eye
-    desired_rx_eyeX = 1.0 - desired_lx_eye[0]
-
-    # determine the scale of the new resulting image by taking
-    # the ratio of the distance between eyes in the *current*
-    # image to the ratio of distance between eyes in the
-    # *desired* image
-    dist = np.sqrt((dX ** 2) + (dY ** 2))
-    desired_dist = (desired_rx_eyeX - desired_lx_eye[0])
-    desired_dist *= desired_face_width
-    scale = desired_dist / dist
-
-    # compute center (x, y)-coordinates (i.e., the median point)
-    # between the two eyes in the input image
-    eyes_center = ((lx_eye_center[0] + rx_eye_center[0]) // 2,
-                   (lx_eye_center[1] + rx_eye_center[1]) // 2)
-
-    return eyes_center, angle, scale
+    return align_matrix
 
 
 #################################

@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 from skimage.transform._geometric import _umeyama
 from ast import literal_eval
+import copy
 
 import logging
 
@@ -23,6 +24,7 @@ class FaceGenerator:
         self.border_expand = literal_eval(config['border_expand'])
         self.resize_fun = resize_fun
 
+    # TODO fix alignment process
     def generate(self, seed_face: Face=None, output_size=None):
         """
         Operates pre and post processing around the generation function
@@ -32,15 +34,13 @@ class FaceGenerator:
         """
 
         # pre-process face
-
-        if self.border_expand:
-            seed_face.expand_face_boundary(self.border_expand)
-
         if self.align:
-            face_img = utils._align_face(seed_face, size=self.input_size)
+            face_img, _ = utils.align_face(seed_face, boundary_resize_factor=self.border_expand)
+            _, reverse_matrix = utils.align_face(seed_face, boundary_resize_factor=self.border_expand, invert=True)
         else:
             face_img = seed_face.get_face_img()
-            face_img = cv2.resize(face_img, self.input_size)
+            #old_size = face_img.shape[:2][::-1]
+        face_img = cv2.resize(face_img, self.input_size)
 
         face_img = face_img / 255 * 2 - 1 if self.tanh_fix else face_img / 255.
 
@@ -48,10 +48,18 @@ class FaceGenerator:
         gen_face, face_mask = self.generator_fun(face_img)
 
         if self.align:
-            eyes_center, angle, scale = utils.get_rotation_info(seed_face)
-            m = cv2.getRotationMatrix2D(seed_face.get_face_center(absolute=False), -angle, 2 - scale)
-            gen_face = cv2.warpAffine(gen_face, m, self.input_size,
-                           flags=cv2.INTER_CUBIC)
+            #aligned_face = copy.copy(seed_face)
+            #aligned_face.img = gen_face
+            #gen_face, align_matrix = utils.align_face(seed_face, boundary_resize_factor=self.border_expand,
+            #                                          invert=True, img=cv2.resize(gen_face, old_size))
+            # Align back mask too
+            #gen_face = cv2.resize(gen_face, old_size)
+            #face_mask = cv2.resize(face_mask, old_size)
+            gen_face = cv2.warpAffine(gen_face, reverse_matrix, self.input_size,
+                                       borderMode=cv2.BORDER_REPLICATE)
+            face_mask = cv2.warpAffine(face_mask, reverse_matrix, self.input_size,  borderMode=cv2.BORDER_REPLICATE)
+            #gen_face = cv2.resize(gen_face, self.input_size)
+            #face_mask = cv2.resize(face_mask, self.input_size)
 
         # post-process face
         gen_face = (gen_face + 1) * 255 / 2 if self.tanh_fix else gen_face * 255

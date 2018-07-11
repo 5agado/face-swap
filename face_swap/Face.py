@@ -1,3 +1,6 @@
+import copy
+
+
 class Face:
     def __init__(self, img, rect=None):
         """
@@ -22,12 +25,16 @@ class Face:
                 y += self.rect.top
             return x, y
 
-    def get_face_img(self):
+    def get_face_img(self, boundary_resize_factor: tuple=None):
         """
         Return image bounded to target face (boundary is defined by rect attribute)
         :return:
         """
-        top, right, bottom, left = self.rect.get_coords()
+        if boundary_resize_factor:
+            target_rect = self.rect.resize(boundary_resize_factor)
+        else:
+            target_rect = self.rect
+        top, right, bottom, left = target_rect.get_coords()
         face_img = self.img[top:bottom, left:right]
         return face_img
 
@@ -36,29 +43,17 @@ class Face:
         Return size of face as (width, height)
         :return: (w, h)
         """
-        w, h = self.rect.get_size()
+        #w, h = self.rect.get_size()
+        # Consider image cause rect might exceed actual image boundaries
+        face_img = self.get_face_img()
+        w, h = face_img.shape[:2][::-1]
         return w, h
 
-    def expand_face_boundary(self, border_expand: tuple):
-        face_size = self.get_face_size()
-        img_size = self.img.shape
-        # if float given, consider as expansion ratio and obtain equivalent int values
-        if type(border_expand[0]) == float:
-            border_expand = (int(border_expand[0] * face_size[0]),
-                             int(border_expand[1] * face_size[1]))
+    def __copy__(self):
+        face_copy = Face(self.img.copy(), copy.copy(self.rect))
+        face_copy.landmarks = self.landmarks.copy()
+        return face_copy
 
-        border_expand = (border_expand[0]//2, border_expand[1]//2)
-
-        top, right, bottom, left = self.rect.get_coords()
-        x, y = left, top
-        w = right - left
-        h = bottom - top
-        new_top = max(0, y - border_expand[1])
-        new_bottom = min(img_size[0], y + h + border_expand[1])
-        new_left = max(0, x - border_expand[0])
-        new_right = min(img_size[1], x + w + border_expand[0])
-
-        self.rect = Face.Rectangle(top=new_top, right=new_right, left=new_left, bottom=new_bottom)
 
     class Rectangle:
         def __init__(self, top, right, bottom, left):
@@ -86,4 +81,31 @@ class Face:
             w = self.right - self.left
             h = self.bottom - self.top
             return w, h
+
+        def resize(self, resize_factor: tuple):
+            """
+            Return new resized rectangle
+            :return:
+            """
+            w, h = self.get_size()
+            # if float given, consider as expansion ratio and obtain equivalent int values
+            if type(resize_factor[0]) == float:
+                resize_factor = (int(resize_factor[0] * w),
+                                 int(resize_factor[1] * h))
+
+            # divide by two as we add the border on each side
+            resize_factor = (resize_factor[0] // 2, resize_factor[1] // 2)
+
+            # compute new rectangle coords
+            return Face.Rectangle(top=max(0, self.top - resize_factor[1]),
+                                  right=self.right + resize_factor[0],
+                                  left=max(0, self.left - resize_factor[0]),
+                                  bottom=self.bottom + resize_factor[1])
+
+        def __copy__(self):
+            return Face.Rectangle(self.top, self.right, self.bottom, self.left)
+
+        def __str__(self):
+            return "top: {}, left: {}, bottom: {}, right: {}".format(
+                self.top, self.left, self.bottom, self.right)
 

@@ -27,12 +27,15 @@ def main(_=None):
                         default=CONFIG_PATH)
     parser.add_argument('-v', dest='verbose', action='store_true')
     parser.set_defaults(verbose=False)
+    parser.add_argument('--process_images', dest='process_images', action='store_true')
+    parser.set_defaults(process_images=False)
     parser.add_argument('-s', metavar='step_mod', dest='step_mod', default=1,
                         help="Step module defining which face to actually save")
 
     args = parser.parse_args()
     input_path = Path(args.input_path)
     output_path = Path(args.output_path)
+    process_images = args.process_images
     config_path = Path(args.config_path)
     step_mod = int(args.step_mod)
     if args.verbose:
@@ -48,15 +51,6 @@ def main(_=None):
         logging.info("No such config file: {}".format(config_path))
         sys.exit(1)
 
-    # get a valid file from given directory
-    if input_path.is_dir():
-        video_files = image_processing.get_imgs_paths(input_path, img_types=('*.gif', '*.webm', '*.mp4'), as_str=True)
-        if not video_files:
-            logging.error("No valid video files in: {}".format(input_path))
-            sys.exit(1)
-        # for now just pick first one
-        input_path = Path(video_files[0])
-
     with open(str(config_path), 'r') as ymlfile:
         cfg = yaml.load(ymlfile)
 
@@ -64,35 +58,67 @@ def main(_=None):
     frame_count = 0
     success_count = 0
 
-    # "Load" input video
-    input_video = cv2.VideoCapture(str(input_path))
+    if process_images:
+        # collected all image paths
+        img_paths = image_processing.get_imgs_paths(input_path, as_str=False)
 
-    logging.info("Running Face Extraction over video")
-    # Process frame by frame
-    # TODO would be good to have an hint on progress percentage
-    while input_video.isOpened():
-        ret, frame = input_video.read()
-        if ret == True:
+        logging.info("Running Face Extraction over images")
+        # iterate over all collected image paths
+        for img_path in tqdm(img_paths):
             frame_count += 1
             try:
-                faces = face_detector.detect_faces(frame)
+                img = cv2.imread(str(img_path))
+                faces = face_detector.detect_faces(img)
                 for face in faces:
                     extracted_face = face_detector.extract_face(face)
-
                     if frame_count % step_mod == 0:
                         cv2.imwrite(str(output_path / "face_{:04d}.jpg".format(success_count)),
                                     extracted_face)
                         success_count += 1
             except FaceSwapException as e:
-                logging.debug("Frame {}: {}".format(frame_count, e))
+                logging.debug("From {}: {}".format(img_path.name, e))
             except Exception as e:
                 logging.error(e)
                 raise
-        else:
-            break
+    else:
+        # get a valid file from given directory
+        if input_path.is_dir():
+            video_files = image_processing.get_imgs_paths(input_path, img_types=('*.gif', '*.webm', '*.mp4'), as_str=True)
+            if not video_files:
+                logging.error("No valid video files in: {}".format(input_path))
+                sys.exit(1)
+            # for now just pick first one
+            input_path = Path(video_files[0])
 
-    # Release everything if job is finished
-    input_video.release()
+        # "Load" input video
+        input_video = cv2.VideoCapture(str(input_path))
+
+        logging.info("Running Face Extraction over video")
+        # Process frame by frame
+        # TODO would be good to have an hint on progress percentage
+        while input_video.isOpened():
+            ret, frame = input_video.read()
+            if ret:
+                frame_count += 1
+                try:
+                    faces = face_detector.detect_faces(frame)
+                    for face in faces:
+                        extracted_face = face_detector.extract_face(face)
+
+                        if frame_count % step_mod == 0:
+                            cv2.imwrite(str(output_path / "face_{:04d}.jpg".format(success_count)),
+                                        extracted_face)
+                            success_count += 1
+                except FaceSwapException as e:
+                    logging.debug("Frame {}: {}".format(frame_count, e))
+                except Exception as e:
+                    logging.error(e)
+                    raise
+            else:
+                break
+
+        # Release everything if job is finished
+        input_video.release()
 
     logging.info("Extracted {}/{} faces".format(success_count, frame_count))
 
