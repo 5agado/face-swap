@@ -137,8 +137,10 @@ def swap_faces(from_face: Face, detector: FaceDetector,
     mask_border_expand = (min(max_expansion_w, mask_border_expand[0]), min(max_expansion_h, mask_border_expand[1]))
     mask = _get_mask(config, from_face, gen_mask, border_expand=mask_border_expand)
     # expand border of image as much as done for mask
-    new_face.img = cv2.copyMakeBorder(new_face.img, top=mask_border_expand[1], bottom=mask_border_expand[1],
-                                      left=mask_border_expand[0], right=mask_border_expand[0],
+    #print(mask_border_expand[1]//2)
+    #print(mask_border_expand[0]//2)
+    new_face.img = cv2.copyMakeBorder(new_face.img, top=mask_border_expand[1]//2, bottom=mask_border_expand[1]//2,
+                                      left=mask_border_expand[0]//2, right=mask_border_expand[0]//2,
                                       borderType=cv2.BORDER_REFLECT)
 
     # merge from and to faces via the specified method
@@ -149,6 +151,7 @@ def swap_faces(from_face: Face, detector: FaceDetector,
                                 center[:][::-1],
                                 cv2.NORMAL_CLONE)
     else:
+        # If given use color correction, otherwise rely on histogram matching
         if 'color_correct_blur_frac' in config:
             color_correct_blur_frac = config['color_correct_blur_frac']
 
@@ -157,12 +160,11 @@ def swap_faces(from_face: Face, detector: FaceDetector,
                 np.mean(new_face.landmarks[FaceDetector.left_eye], axis=0) -
                 np.mean(from_face.landmarks[FaceDetector.right_eye], axis=0))
 
-            # notice that we pass the face images, which need to be of same size
-            # for this method to work
-            from_face_img = from_face.get_face_img()
-            #new_face.img = utils.correct_colours(from_face_img, new_face.img, blur_amount)
-            #new_face.img = utils.hist_eq(new_face.img, from_face_img)  # possible worst method
-            new_face.img = utils.color_hist_match(new_face.img, from_face_img)
+            # face images need to be of same size for this method to work
+            new_face.img = utils.correct_colours(from_face.get_face_img(mask_border_expand), new_face.img, blur_amount)
+        else:
+            new_face.img = utils.color_hist_match(new_face.img, from_face.get_face_img(mask_border_expand))
+            # new_face.img = utils.hist_eq(new_face.img, from_face.get_face_img())  # possible worst method
 
         # basic insertion with masking
         res = utils.insert_image_in(new_face.img, from_face.img, center, mask)
@@ -182,22 +184,56 @@ def _get_mask(config, from_face: Face, gen_mask=None, border_expand=(0, 0)):
                                         blur_size=config.get('blur_size', None))
 
         top, right, bottom, left = from_face.rect.get_coords()
-        face_mask = face_mask[max(0, top - border_expand[1]): bottom + border_expand[1],
-                              max(0, left - border_expand[0]): right + border_expand[0], :]
+        face_mask = face_mask[max(0, top - border_expand[1]//2): bottom + border_expand[1]//2,
+                              max(0, left - border_expand[0]//2): right + border_expand[0]//2, :]
 
         if gen_mask is not None and mask_method == 'mix_mask':
             mask = np.clip(face_mask + gen_mask, 0, 255)
         else:
             mask = face_mask
     else:
-        mask = cv2.copyMakeBorder(gen_mask, top=border_expand[1], bottom=border_expand[1],
-                                  left=border_expand[0], right=border_expand[0],
+        mask = cv2.copyMakeBorder(gen_mask, top=border_expand[1]//2, bottom=border_expand[1]//2,
+                                  left=border_expand[0]//2, right=border_expand[0]//2,
                                   borderType=cv2.BORDER_CONSTANT, value=[0, 0, 0])
         if mask_method == 'gen_mask_fix':
             blur_size = config.get('blur_size', 1)
-            #mask = cv2.blur(mask, (blur_size, blur_size))
-            mask = cv2.medianBlur(mask, blur_size)  # highly effective against salt-and-pepper noise
+            mask = cv2.blur(mask, (blur_size, blur_size))
+            #mask = cv2.medianBlur(mask, 5)  # highly effective against salt-and-pepper noise
     return mask
+
+
+def get_face_generator(cfg, model_name, model_version):
+    model_cfg = cfg[model_name][model_version]
+
+    resize_fun = None
+    if cfg['swap']['use_super_resolution']:
+        sr_model = super_resolution.get_SRResNet(cfg['super_resolution'])
+        resize_fun = lambda img, size: FaceGenerator.super_resolution_resizing(sr_model, img, size)
+
+    # TODO improve check
+    # load generators (autoencoder or GAN)
+    if "gan" in model_name:
+        gen_a, gen_b, _, _ = gan.get_gan(model_cfg, load_discriminators=False)
+    else:
+        gen_a, gen_b = autoencoder.get_autoencoders(model_cfg)
+    target_gen = gen_a if cfg.get('use_aut_a') else gen_b
+
+    gen_input_size = literal_eval(model_cfg['img_shape'])[:2]
+    # if we use a masked gan, need to define out generate function (not as simple as call predict)
+    if model_cfg['masked']:
+        g_in, g_out, alpha, fun_generate, fun_mask, fun_abgr = gan_utils.cycle_variables_masked(target_gen)
+        gen_fun = lambda x: fun_abgr([np.expand_dims(x, 0)])[0][0]
+        face_generator = FaceGenerator.FaceGenerator(
+            lambda face_img: FaceGenerator.gan_masked_generate_face(gen_fun, face_img),
+            input_size=gen_input_size, config=cfg['swap'], resize_fun=resize_fun)
+
+    # otherwise proceed by simply passing the generator
+    else:
+        face_generator = FaceGenerator.FaceGenerator(
+            lambda face_img: FaceGenerator.aue_generate_face(target_gen, face_img),
+            input_size=gen_input_size, config=cfg['swap'], resize_fun=resize_fun)
+
+    return face_generator
 
 
 def main(_=None):
@@ -252,36 +288,7 @@ def main(_=None):
         cfg = yaml.load(ymlfile)
 
     face_detector = FaceDetector(cfg)
-
-    model_cfg = cfg[model_name][model_version]
-
-    resize_fun = None
-    if cfg['swap']['use_super_resolution']:
-        sr_model = super_resolution.get_SRResNet(cfg['super_resolution'])
-        resize_fun = lambda img, size: FaceGenerator.super_resolution_resizing(sr_model, img, size)
-
-    # TODO improve check
-    # load generators (autoencoder or GAN)
-    if "gan" in model_name:
-        gen_a, gen_b, _, _ = gan.get_gan(model_cfg, load_discriminators=False)
-    else:
-        gen_a, gen_b = autoencoder.get_autoencoders(model_cfg)
-    target_gen = gen_a if cfg.get('use_aut_a') else gen_b
-
-    gen_input_size = literal_eval(model_cfg['img_shape'])[:2]
-    # if we use a masked gan, need to define out generate function (not as simple as call predict)
-    if model_cfg['masked']:
-        g_in, g_out, alpha, fun_generate, fun_mask, fun_abgr = gan_utils.cycle_variables_masked(target_gen)
-        gen_fun = lambda x: fun_abgr([np.expand_dims(x, 0)])[0][0]
-        face_generator = FaceGenerator.FaceGenerator(
-            lambda face_img: FaceGenerator.gan_masked_generate_face(gen_fun, face_img),
-            input_size=gen_input_size, config=cfg['swap'], resize_fun=resize_fun)
-
-    # otherwise proceed by simply passing the generator
-    else:
-        face_generator = FaceGenerator.FaceGenerator(
-            lambda face_img: FaceGenerator.aue_generate_face(target_gen, face_img),
-            input_size=gen_input_size, config=cfg['swap'], resize_fun=resize_fun)
+    face_generator = get_face_generator(cfg, model_name, model_version)
 
     swapper = Swapper(face_detector, face_generator, cfg['swap'], save_all=save_all)
 
