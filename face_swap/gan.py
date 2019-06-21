@@ -95,7 +95,7 @@ def Decoder(input_shape, init_filters=256, num_deconv_blocks=3, num_res_blocks=2
 
     for i in range(num_deconv_blocks):
         # TODO possible fix: use k=4
-        x = upscale(init_filters // (1 if i == 0 else (2 ** i)))(x)
+        x = upscale(init_filters // (2 ** i))(x)
 
     for i in range(num_res_blocks):
         # res block num filters is based on last upscale block num of filters

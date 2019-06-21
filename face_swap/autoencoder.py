@@ -47,7 +47,7 @@ def Decoder(input_shape, init_filters=256, num_deconv_blocks=3):
     x = model_input
 
     for i in range(num_deconv_blocks):
-        x = upscale(init_filters // (1 if i == 0 else (2 ** i)))(x)
+        x = upscale(init_filters // (2 ** i))(x)
 
     x = Conv2D(3, kernel_size=5, padding='same', activation='sigmoid')(x)
     return Model(model_input, x)
