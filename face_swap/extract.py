@@ -10,10 +10,28 @@ import tensorflow as tf
 tf.logging.set_verbosity(tf.logging.ERROR)
 
 # data-science-utils
-from utils import image_processing
+from ds_utils import image_processing
+from ds_utils import video_utils
 
 from face_swap import CONFIG_PATH
 from face_swap.FaceDetector import FaceDetector, FaceSwapException
+
+
+def frame_extract_fun(frame, frame_count, face_detector: FaceDetector, output_path: Path, step_mod: int):
+    try:
+        faces = face_detector.detect_faces(frame)
+        for face_count, face in enumerate(faces):
+            extracted_face = face_detector.extract_face(face)
+
+            if frame_count % step_mod == 0:
+                cv2.imwrite(str(output_path / "face_{:04d}_{:04d}.jpg".format(frame_count, face_count)),
+                            extracted_face)
+                frame_count += 1
+    except FaceSwapException as e:
+        logging.debug("Frame {}: {}".format(frame_count, e))
+    except Exception as e:
+        logging.error(e)
+        raise
 
 
 def main(_=None):
@@ -30,7 +48,7 @@ def main(_=None):
     parser.add_argument('--process_images', dest='process_images', action='store_true')
     parser.set_defaults(process_images=False)
     parser.add_argument('-s', metavar='step_mod', dest='step_mod', default=1,
-                        help="Step module defining which face to actually save")
+                        help="Save only face for frame where frame_num%step_mod == 0")
 
     args = parser.parse_args()
     input_path = Path(args.input_path)
@@ -56,7 +74,6 @@ def main(_=None):
 
     face_detector = FaceDetector(cfg)
     frame_count = 0
-    success_count = 0
 
     if process_images:
         # collected all image paths
@@ -66,20 +83,9 @@ def main(_=None):
         # iterate over all collected image paths
         for img_path in tqdm(img_paths):
             frame_count += 1
-            try:
-                img = cv2.imread(str(img_path))
-                faces = face_detector.detect_faces(img)
-                for face in faces:
-                    extracted_face = face_detector.extract_face(face)
-                    if frame_count % step_mod == 0:
-                        cv2.imwrite(str(output_path / "face_{:04d}.jpg".format(success_count)),
-                                    extracted_face)
-                        success_count += 1
-            except FaceSwapException as e:
-                logging.debug("From {}: {}".format(img_path.name, e))
-            except Exception as e:
-                logging.error(e)
-                raise
+            img = cv2.imread(str(img_path))
+            frame_extract_fun(img, frame_count, face_detector, output_path, step_mod)
+    # process video
     else:
         # get a valid file from given directory
         if input_path.is_dir():
@@ -90,37 +96,10 @@ def main(_=None):
             # for now just pick first one
             input_path = Path(video_files[0])
 
-        # "Load" input video
-        input_video = cv2.VideoCapture(str(input_path))
-
         logging.info("Running Face Extraction over video")
-        # Process frame by frame
-        # TODO would be good to have an hint on progress percentage
-        while input_video.isOpened():
-            ret, frame = input_video.read()
-            if ret:
-                frame_count += 1
-                try:
-                    faces = face_detector.detect_faces(frame)
-                    for face in faces:
-                        extracted_face = face_detector.extract_face(face)
 
-                        if frame_count % step_mod == 0:
-                            cv2.imwrite(str(output_path / "face_{:04d}.jpg".format(success_count)),
-                                        extracted_face)
-                            success_count += 1
-                except FaceSwapException as e:
-                    logging.debug("Frame {}: {}".format(frame_count, e))
-                except Exception as e:
-                    logging.error(e)
-                    raise
-            else:
-                break
-
-        # Release everything if job is finished
-        input_video.release()
-
-    logging.info("Extracted {}/{} faces".format(success_count, frame_count))
+        video_utils.process_video(str(input_path), lambda frame, frame_count:
+                                  frame_extract_fun(frame, frame_count, face_detector, output_path, step_mod))
 
 
 if __name__ == "__main__":

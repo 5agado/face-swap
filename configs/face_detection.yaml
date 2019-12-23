@@ -1,0 +1,14 @@
+mtcnn_model_path: /models/face_recognition/mtcnn_weights
+mtcnn_confidence_threshold: 0.9
+# way slower than built-in one. Not sure how much better
+#detector_path: /models/mmod_human_face_detector.dat
+shape_predictor_path: /models/face_recognition/shape_predictor_68_face_landmarks.dat
+extract:
+    size: (256, 256)
+    border_expand: (0., 0.)
+    align: True
+    maintain_proportion: False
+    masked: False
+    # params used when masking
+    dilation_kernel: (1, 1)
+    blur_size: 1
